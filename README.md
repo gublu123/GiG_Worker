@@ -1,41 +1,51 @@
-Gig Worker Financial Resilience — prototype
-===========================================
+# Backend — FastAPI + XGBoost + Gemini
 
-Monorepo layout
+The mobile app ships with a mirrored, on-device copy of this pipeline so the prototype
+stays interactive with no server. Point it here when you want the real thing.
 
-```
-.               <- /frontend : Expo (SDK 57) + TypeScript + NativeWind v4 app
-└── backend/    <- /backend  : FastAPI service hosting the real ML + LLM pipeline
-```
-
-Frontend (this directory)
-
-```bash
-npm install
-npx expo start          # scan the QR with Expo Go, or press i / a
-npx expo start --web    # browser preview
-```
-
-Backend (see backend/README.md)
+## Run locally
 
 ```bash
 cd backend
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+export GEMINI_API_KEY=your_key_here        # optional
 uvicorn main:app --reload --port 8000
 ```
 
-The pipeline
+Verify:
 
-1. **Dashboard sliders** produce six financial features (savings ratio,
-   expense-to-income, debt burden, income volatility, emergency runway, income level).
-2. **AI #1 — Resilience score.** `lib/resilienceModel.ts` mirrors the backend
-   `XGBClassifier` inference path (12 boosted stumps + sigmoid) so the score re-computes
-   live as you drag, shifting red / amber / green. Bands: `<40` high risk, `40-69` needs
-   watch, `>=70` stable.
-3. **AI #3 — Generative coach.** `lib/coach.ts` sends the snapshot + score to Gemini
-   through `@google/generative-ai` with an empathetic-coach system prompt, and falls back
-   to a deterministic on-device coach when no API key is present.
+```bash
+curl http://localhost:8000/health
+```
 
-Screens: Dashboard (score, metrics, 6-month chart, sliders) · Coach (grounded chat) ·
-Plan (buffer goal, loan default shield, ranked actions) · Profile (worker card, model
-attribution, Gemini key) · Score detail modal (feature attribution breakdown).
+## Endpoints
+
+| Method | Path | What it does |
+| --- | --- | --- |
+| GET | `/health` | Liveness + feature list + whether Gemini is configured |
+| POST | `/api/v1/resilience-score` | AI #1 — XGBoost score (0-100), tier, SHAP-style contributions |
+| POST | `/api/v1/coach` | AI #3 — Gemini coaching (`?question=` optional) |
+| POST | `/api/v1/pipeline` | Both, in sequence — what the app calls |
+
+## Payload
+
+```json
+{
+  "monthly_income": 2600,
+  "monthly_expenses": 1850,
+  "savings_balance": 1500,
+  "debt_payments": 320,
+  "income_volatility": 0.45
+}
+```
+
+## Model notes
+
+- `XGBClassifier`, 220 trees, `max_depth=3`, `learning_rate=0.08`, trained at boot on 40k
+  synthesised gig-worker profiles labelled "no missed payment in the next 60 days".
+- Score = `round(100 * P(default-free))`, banded `<40 High risk`, `40-69 Needs watch`,
+  `>=70 Stable` — the exact same bands the mobile app renders.
+- Contributions come from `predict(..., predcontribs=True)`, i.e. native SHAP values.
+- If `GEMINI_API_KEY` is missing the coach degrades to a deterministic template, so the
+  endpoint never 500s during a demo.
